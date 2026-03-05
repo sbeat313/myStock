@@ -9,11 +9,27 @@
 - 顯示累計盈虧（買進/賣出/費用/股息）
 - 手動新增國內/海外股息
 
-## 啟動
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python app.py
+## 啟動方式
+
+### Windows（建議）
+1. 直接雙擊 `start.bat`
+2. 或在 cmd 執行：
+```bat
+cd /d 專案路徑
+py app.py --open-browser
 ```
 
-瀏覽 `http://localhost:5000`。
+### macOS / Linux
+```bash
+python3 app.py
+```
+
+啟動後會看到：
+- `[啟動成功] 請開啟瀏覽器：...`
+- `[停止服務] 在此視窗按 Ctrl + C`
+
+## 常見問題
+- 若顯示埠號被占用，改用：
+```bash
+python app.py --port 5001
+```

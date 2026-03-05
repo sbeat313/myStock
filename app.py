@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import argparse
 import cgi
 import csv
 import html
 import io
 import os
 import sqlite3
+import sys
+import webbrowser
 from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -224,6 +227,11 @@ table{{width:100%;border-collapse:collapse}} th,td{{border:1px solid #ddd;paddin
 
 
 class Handler(BaseHTTPRequestHandler):
+    def do_HEAD(self):
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.end_headers()
+
     def do_GET(self):
         parsed = urlparse(self.path)
         qs = parse_qs(parsed.query)
@@ -235,7 +243,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if self.path == "/upload":
-            form = cgi.FieldStorage(fp=self.rfile, headers=self.headers, environ={"REQUEST_METHOD": "POST"})
+            form = cgi.FieldStorage(fp=self.rfile, headers=self.headers, environ={"REQUEST_METHOD": "POST", "CONTENT_TYPE": self.headers.get("Content-Type", "")})
             fileitem = form["csv_file"] if "csv_file" in form else None
             msg = "請先選擇 CSV 檔案。"
             if fileitem is not None and getattr(fileitem, "file", None):
@@ -278,8 +286,42 @@ class Handler(BaseHTTPRequestHandler):
         return
 
 
-if __name__ == "__main__":
+def run_server(host: str, port: int, open_browser: bool) -> int:
     init_db()
-    server = ThreadingHTTPServer(("0.0.0.0", 5000), Handler)
-    print("Server running: http://0.0.0.0:5000")
-    server.serve_forever()
+    try:
+        server = ThreadingHTTPServer((host, port), Handler)
+    except OSError as exc:
+        print(f"[錯誤] 無法啟動伺服器：{exc}")
+        print("[提示] 可能是埠號被占用，可改用：python app.py --port 5001")
+        return 1
+
+    url = f"http://{host}:{port}" if host != "0.0.0.0" else f"http://127.0.0.1:{port}"
+    print(f"[啟動成功] 請開啟瀏覽器：{url}")
+    print("[停止服務] 在此視窗按 Ctrl + C")
+
+    if open_browser:
+        try:
+            webbrowser.open(url)
+        except Exception:
+            pass
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\n[已停止] 伺服器已關閉。")
+    finally:
+        server.server_close()
+    return 0
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="本地股票交易紀錄管理系統")
+    parser.add_argument("--host", default="127.0.0.1", help="監聽位址，預設 127.0.0.1")
+    parser.add_argument("--port", type=int, default=5000, help="監聽埠號，預設 5000")
+    parser.add_argument("--open-browser", action="store_true", help="啟動後自動開啟瀏覽器")
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    args = parse_args()
+    sys.exit(run_server(host=args.host, port=args.port, open_browser=args.open_browser))
