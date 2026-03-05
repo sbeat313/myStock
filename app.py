@@ -184,25 +184,62 @@ def query_data(year: str, date: str, stock_name: str):
     return trades, dividends
 
 
+def classify_market(market: str) -> str:
+    text = (market or "").strip().lower()
+    domestic_keywords = {"國內", "台灣", "臺灣", "tw", "twn", "taiwan"}
+    overseas_keywords = {"海外", "國外", "美國", "美股", "us", "usa", "hk", "jp", "sg"}
+
+    if any(k in text for k in domestic_keywords):
+        return "domestic"
+    if any(k in text for k in overseas_keywords):
+        return "overseas"
+
+    # 預設：若無法辨識，歸類為 overseas（可避免海外交易被算進國內）
+    return "overseas"
+
+
 def calc_summary(trades, dividends):
-    total_buy = total_sell = total_fees = realized = 0.0
+    groups = {
+        "domestic": {"buy": 0.0, "sell": 0.0, "fees": 0.0, "realized": 0.0, "dividend": 0.0},
+        "overseas": {"buy": 0.0, "sell": 0.0, "fees": 0.0, "realized": 0.0, "dividend": 0.0},
+    }
+
     for t in trades:
+        group = classify_market(t["market"])
         fee = float(t["fee"] + t["other_fee"])
-        total_fees += fee
         amount = float(t["amount"])
-        if t["side"] == "BUY":
-            total_buy += amount
-            realized -= amount + fee
-        elif t["side"] == "SELL":
-            total_sell += amount
-            realized += amount - fee
-    dividend_income = sum(float(d["amount"]) for d in dividends)
+        side = t["side"]
+
+        groups[group]["fees"] += fee
+        if side == "BUY":
+            groups[group]["buy"] += amount
+            groups[group]["realized"] -= amount + fee
+        elif side == "SELL":
+            groups[group]["sell"] += amount
+            groups[group]["realized"] += amount - fee
+
+    for d in dividends:
+        group = classify_market(d["market"])
+        groups[group]["dividend"] += float(d["amount"])
+
+    domestic_pl = groups["domestic"]["realized"] + groups["domestic"]["dividend"]
+    overseas_pl = groups["overseas"]["realized"] + groups["overseas"]["dividend"]
+
+    total_buy = groups["domestic"]["buy"] + groups["overseas"]["buy"]
+    total_sell = groups["domestic"]["sell"] + groups["overseas"]["sell"]
+    total_fees = groups["domestic"]["fees"] + groups["overseas"]["fees"]
+    dividend_income = groups["domestic"]["dividend"] + groups["overseas"]["dividend"]
+
     return {
         "total_buy": total_buy,
         "total_sell": total_sell,
         "total_fees": total_fees,
         "dividend_income": dividend_income,
-        "cumulative_pl": realized + dividend_income,
+        "cumulative_pl": domestic_pl + overseas_pl,
+        "domestic_pl": domestic_pl,
+        "overseas_pl": overseas_pl,
+        "domestic_dividend": groups["domestic"]["dividend"],
+        "overseas_dividend": groups["overseas"]["dividend"],
     }
 
 
@@ -241,7 +278,7 @@ table{{width:100%;border-collapse:collapse}} th,td{{border:1px solid #ddd;paddin
 <div class='card'><h2>1) 匯入交易 CSV</h2><form method='post' action='/upload' enctype='multipart/form-data'><input type='file' name='csv_file' accept='.csv' required><button>上傳並匯入</button></form></div>
 <div class='card'><h2>2) 新增股息（手動）</h2><form method='post' action='/dividend'><input type='date' name='dividend_date' required><input name='stock_name' placeholder='股票名稱' required><input name='market' placeholder='市場別'><input type='number' step='0.01' name='amount' placeholder='股息金額' required><input name='currency' placeholder='幣別'><input name='note' placeholder='備註'><button>新增股息</button></form></div>
 <div class='card'><h2>3) 查詢</h2><form method='get' action='/'><input type='number' name='year' placeholder='年份' value='{esc(year)}'><input type='date' name='date' value='{esc(date)}'><input name='stock_name' placeholder='股票名稱' value='{esc(stock_name)}'><button>查詢</button></form></div>
-<div class='card'><h2>4) 累計盈虧摘要</h2><div class='summary'><div>總買進金額：{summary['total_buy']:.2f}</div><div>總賣出金額：{summary['total_sell']:.2f}</div><div>總交易費用：{summary['total_fees']:.2f}</div><div>總股息收入：{summary['dividend_income']:.2f}</div><div><b>累計盈虧：{summary['cumulative_pl']:.2f}</b></div></div></div>
+<div class='card'><h2>4) 累計盈虧摘要</h2><div class='summary'><div>總買進金額：{summary['total_buy']:.2f}</div><div>總賣出金額：{summary['total_sell']:.2f}</div><div>總交易費用：{summary['total_fees']:.2f}</div><div>總股息收入：{summary['dividend_income']:.2f}</div><div>國內股息：{summary['domestic_dividend']:.2f}</div><div>海外股息：{summary['overseas_dividend']:.2f}</div><div><b>國內累計盈虧：{summary['domestic_pl']:.2f}</b></div><div><b>海外累計盈虧：{summary['overseas_pl']:.2f}</b></div><div><b>總累計盈虧：{summary['cumulative_pl']:.2f}</b></div></div></div>
 <div class='card'><h2>交易紀錄（{len(trades)} 筆）</h2><table><thead><tr><th>成交時間</th><th>買賣別</th><th>市場別</th><th>股票名稱</th><th>股數</th><th>成交價金</th><th>費用</th><th>幣別</th><th>來源</th></tr></thead><tbody>{trade_rows}</tbody></table></div>
 <div class='card'><h2>股息紀錄（{len(dividends)} 筆）</h2><table><thead><tr><th>日期</th><th>股票名稱</th><th>市場別</th><th>金額</th><th>幣別</th><th>備註</th></tr></thead><tbody>{div_rows}</tbody></table></div>
 </body></html>
