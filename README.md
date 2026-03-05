@@ -33,3 +33,6 @@ python3 app.py
 ```bash
 python app.py --port 5001
 ```
+
+
+- 已移除對 `cgi` 模組依賴，支援 Python 3.13。

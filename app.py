@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import cgi
 import csv
 import html
 import io
@@ -12,6 +11,8 @@ import webbrowser
 from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from email.parser import BytesParser
+from email.policy import default
 from urllib.parse import parse_qs, quote_plus, urlparse
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "stock_records.db")
@@ -85,6 +86,28 @@ def normalize_side(side: str) -> str:
         return "SELL"
     return side.upper()
 
+
+
+
+def get_uploaded_file_content(headers, body: bytes, field_name: str) -> bytes | None:
+    content_type = headers.get("Content-Type", "")
+    if "multipart/form-data" not in content_type:
+        return None
+
+    mime_blob = (
+        f"Content-Type: {content_type}\r\n"
+        "MIME-Version: 1.0\r\n\r\n"
+    ).encode("utf-8") + body
+
+    msg = BytesParser(policy=default).parsebytes(mime_blob)
+    if not msg.is_multipart():
+        return None
+
+    for part in msg.iter_parts():
+        if part.get_param("name", header="content-disposition") == field_name:
+            payload = part.get_payload(decode=True)
+            return payload if payload is not None else b""
+    return None
 
 def import_csv(content: str) -> int:
     reader = csv.DictReader(io.StringIO(content))
@@ -243,13 +266,19 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if self.path == "/upload":
-            form = cgi.FieldStorage(fp=self.rfile, headers=self.headers, environ={"REQUEST_METHOD": "POST", "CONTENT_TYPE": self.headers.get("Content-Type", "")})
-            fileitem = form["csv_file"] if "csv_file" in form else None
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length)
+            file_content = get_uploaded_file_content(self.headers, body, "csv_file")
+
             msg = "請先選擇 CSV 檔案。"
-            if fileitem is not None and getattr(fileitem, "file", None):
-                content = fileitem.file.read().decode("utf-8-sig")
-                n = import_csv(content)
-                msg = f"成功匯入 {n} 筆交易資料。" if n else "CSV 沒有可匯入的交易資料。"
+            if file_content is not None:
+                try:
+                    content = file_content.decode("utf-8-sig")
+                    n = import_csv(content)
+                    msg = f"成功匯入 {n} 筆交易資料。" if n else "CSV 沒有可匯入的交易資料。"
+                except UnicodeDecodeError:
+                    msg = "CSV 編碼格式錯誤，請使用 UTF-8 編碼。"
+
             self.send_response(303)
             self.send_header("Location", f"/?msg={quote_plus(msg)}")
             self.end_headers()
